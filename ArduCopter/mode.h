@@ -100,6 +100,7 @@ public:
         AUTOROTATE =   26,  // Autonomous autorotation
         AUTO_RTL =     27,  // Auto RTL, this is not a true mode, AUTO will report as this mode if entered to perform a DO_LAND_START Landing sequence
         TURTLE =       28,  // Flip over after crash
+        DROP =        29,  // Drop mode for mothership deployment
 
         // Mode number 127 reserved for the "drone show mode" in the Skybrush
         // fork at https://github.com/skybrush-io/ardupilot
@@ -1791,6 +1792,62 @@ private:
     uint32_t free_fall_start_ms;    // system time free fall was detected
     float free_fall_start_velz;     // vertical velocity when free fall was detected
 };
+
+class ModeDrop : public Mode {
+
+    public:
+        // inherit constructor
+        using Mode::Mode;
+        Number mode_number() const override { return Number::DROP; }
+    
+        bool init(bool ignore_checks) override;
+        void run() override;
+    
+        bool requires_GPS() const override { return true; }
+        bool has_manual_throttle() const override { return false; }
+        bool allows_arming(AP_Arming::Method method) const override { return true; };
+        bool is_autopilot() const override { return false; }
+    
+        // Throw types
+        enum class ThrowType {
+            Upward = 0,
+            Drop = 1
+        };
+    
+        enum class PreThrowMotorState {
+            STOPPED = 0,
+            RUNNING = 1,
+        };
+    
+    protected:
+    
+        const char *name() const override { return "DROP"; }
+        const char *name4() const override { return "DROP"; }
+    
+    private:
+    
+        bool throw_detected();
+        bool throw_position_good() const;
+        bool throw_height_good() const;
+        bool throw_attitude_good() const;
+    
+        // Throw stages
+        enum ThrowModeStage {
+            Throw_Disarmed,
+            Throw_Detecting,
+            Throw_Wait_Throttle_Unlimited,
+            Throw_Uprighting,
+            Throw_HgtStabilise,
+            Throw_PosHold
+        };
+    
+        ThrowModeStage stage = Throw_Disarmed;
+        ThrowModeStage prev_stage = Throw_Disarmed;
+        uint32_t last_log_ms;
+        bool nextmode_attempted;
+        uint32_t free_fall_start_ms;    // system time free fall was detected
+        float free_fall_start_velz;     // vertical velocity when free fall was detected
+    };
 
 #if MODE_TURTLE_ENABLED
 class ModeTurtle : public Mode {
