@@ -123,6 +123,10 @@ Mode *Copter::mode_from_mode_num(const Mode::Number mode)
         case Mode::Number::THROW:
             ret = &mode_throw;
             break;
+
+        case Mode::Number::DROP:
+            ret = &mode_drop;
+            break;
 #endif
 
 #if HAL_ADSB_ENABLED
@@ -178,10 +182,6 @@ Mode *Copter::mode_from_mode_num(const Mode::Number mode)
             ret = &mode_turtle;
             break;
 #endif
-
-        case Mode::Number::DROP:
-            ret = &mode_drop;
-            break;
 
         default:
             break;

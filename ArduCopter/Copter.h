@@ -1057,6 +1057,7 @@ private:
 #endif
 #if MODE_THROW_ENABLED
     ModeThrow mode_throw;
+    ModeDrop mode_drop;
 #endif
 #if MODE_GUIDED_NOGPS_ENABLED
     ModeGuidedNoGPS mode_guided_nogps;
@@ -1076,7 +1077,6 @@ private:
 #if MODE_TURTLE_ENABLED
     ModeTurtle mode_turtle;
 #endif
-ModeDrop mode_drop;
     // mode.cpp
     Mode *mode_from_mode_num(const Mode::Number mode);
     void exit_mode(Mode *&old_flightmode, Mode *&new_flightmode);
