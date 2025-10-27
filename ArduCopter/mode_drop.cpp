@@ -2,6 +2,67 @@
 
 #if MODE_THROW_ENABLED
 
+const AP_Param::GroupInfo ModeDrop::var_info[] = {
+
+    // @Param: _ACCZ
+    // @DisplayName: Vertical acceleration threshold for freefall detection
+    // @Description: The vertical acceleration threshold for freefall detection. If the vertical acceleration is greater than this threshold, the copter is considered to be in freefall.
+    // @User: Standard
+    AP_GROUPINFO("_ACCZ", 1, ModeDrop, _free_fall_accz, 0.25f),
+
+    // @Param: _VZ_FALL
+    // @DisplayName: Vertical velocity threshold for freefall detection
+    // @Description: The vertical velocity threshold for freefall detection. If the vertical velocity is below this threshold, the copter is considered to be in freefall.
+    // @User: Standard
+    AP_GROUPINFO("_VZ_FALL", 2, ModeDrop, _free_fall_vz, 0.0f),
+
+    // @Param: _ALT_DROP
+    // @DisplayName: Minimum altitude dropped to trigger recovery
+    // @Description: 
+    // @User: Standard
+    AP_GROUPINFO("_ALT_DROP", 3, ModeDrop, _alt_drop, 0.0f),
+
+    // @Param: _VZ_RECOVERY
+    // @DisplayName: Vertical velocity threshold for recovery initiation
+    // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
+    // @User: Standard
+    AP_GROUPINFO("_VZ_RECOVERY", 4, ModeDrop, _vz_recovery, 0.0f),
+
+    // @Param: _VZ_RECOVERY
+    // @DisplayName: Vertical velocity threshold for recovery initiation
+    // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
+    // @User: Standard
+    AP_GROUPINFO("_TIME_DROP", 5, ModeDrop, _t_drop_ms, 0),
+
+    // @Param: _ALT_MIN
+    // @DisplayName: Drop mode minimum recovery altitude
+    // @Description: Minimum altitude above which Drop mode will initiate recovery - 0 to disable the check
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("_ALT_MIN", 6, ModeDrop, _altitude_min, 0),
+
+    // @Param: _ALT_MAX
+    // @DisplayName: Drop mode maximum recovery altitude
+    // @Description: Maximum altitude under which Drop mode will initiate recovery - 0 to disable the check
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("_ALT_MAX", 7, ModeDrop, _altitude_max, 0),
+
+    // @Param: _NEXTMODE
+    // @DisplayName: Drop mode's follow up mode
+    // @Description: Vehicle will switch to this mode after the drop is successfully completed.  Default is to stay in drop mode (29)
+    // @Values: 3:Auto,4:Guided,5:LOITER,6:RTL,9:Land,17:Brake,29:Drop
+    // @User: Standard
+    AP_GROUPINFO("_NEXTMODE", 8, ModeDrop, _nextmode, 29),
+
+    AP_GROUPEND
+};
+
+ModeDrop::ModeDrop(void) : Mode()
+{
+    AP_Param::setup_object_defaults(this, var_info);
+}
+
 // throw_init - initialise throw controller
 bool ModeDrop::init(bool ignore_checks)
 {
@@ -87,14 +148,14 @@ void ModeDrop::run()
         copter.set_auto_armed(true);
     } else if (stage == Throw_PosHold && throw_position_good()) {
         if (!nextmode_attempted) {
-            switch ((Mode::Number)g2.throw_nextmode.get()) {
+            switch ((Mode::Number)_nextmode.get()) {
                 case Mode::Number::AUTO:
                 case Mode::Number::GUIDED:
                 case Mode::Number::RTL:
                 case Mode::Number::LAND:
                 case Mode::Number::BRAKE:
                 case Mode::Number::LOITER:
-                    set_mode((Mode::Number)g2.throw_nextmode.get(), ModeReason::THROW_COMPLETE);
+                    set_mode((Mode::Number)_nextmode.get(), ModeReason::THROW_COMPLETE);
                     break;
                 default:
                     // do nothing
@@ -268,7 +329,7 @@ bool ModeDrop::throw_detected()
     }
 
     // Check that the altitude is within user defined limits
-    const bool height_within_params = (g.drop_altitude_min == 0 || altitude_above_home > g.drop_altitude_min) && (g.drop_altitude_max == 0 || (altitude_above_home < g.drop_altitude_max));
+    const bool height_within_params = (_altitude_min == 0 || altitude_above_home > _altitude_min) && (_altitude_max == 0 || (altitude_above_home < _altitude_max));
 
     // High velocity or free-fall combined with increasing height indicate a possible air-drop or throw release  
     bool possible_throw_detected = (free_falling || high_speed) && changing_height && no_throw_action && height_within_params;

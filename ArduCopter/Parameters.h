@@ -381,8 +381,6 @@ public:
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param_throw_altitude_min,
         k_param_throw_altitude_max,
-        k_param_drop_altitude_min,
-        k_param_drop_altitude_max,
 
         // the k_param_* space is 9-bits in size
         // 511: reserved
@@ -465,8 +463,6 @@ public:
     AP_Enum<ModeThrow::PreThrowMotorState>         throw_motor_start;
     AP_Int16         throw_altitude_min; // minimum altitude in m above which a throw can be detected
     AP_Int16         throw_altitude_max; // maximum altitude in m below which a throw can be detected
-    AP_Int16         drop_altitude_min; // minimum altitude in m above which a drop can be detected
-    AP_Int16         drop_altitude_max; // maximum altitude in m below which a drop can be detected
 #endif
 
     AP_Int16                rc_speed; // speed of fast RC Channels in Hz
@@ -607,6 +603,11 @@ public:
 #if MODE_SYSTEMID_ENABLED
     // we need a pointer to the mode for the G2 table
     void *mode_systemid_ptr;
+#endif
+
+#if MODE_THROW_ENABLED
+    // we need a pointer to the mode for the G2 table
+    void *mode_drop_ptr;
 #endif
 
     // vibration failsafe enable/disable

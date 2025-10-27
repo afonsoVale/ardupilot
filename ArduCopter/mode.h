@@ -1796,6 +1796,7 @@ private:
 class ModeDrop : public Mode {
 
     public:
+        ModeDrop(void);
         // inherit constructor
         using Mode::Mode;
         Number mode_number() const override { return Number::DROP; }
@@ -1818,6 +1819,8 @@ class ModeDrop : public Mode {
             STOPPED = 0,
             RUNNING = 1,
         };
+
+        static const struct AP_Param::GroupInfo var_info[];
     
     protected:
     
@@ -1840,6 +1843,15 @@ class ModeDrop : public Mode {
             Throw_HgtStabilise,
             Throw_PosHold
         };
+
+        AP_Float _free_fall_accz;        // Freefall acceleration threshold   
+        AP_Float _free_fall_vz;        // Freefall velocity threshold   
+        AP_Float _alt_drop;        // Minimum altitude dropped to trigger recovery
+        AP_Float _vz_recovery;        // Vertical velocity threshold for recovery initiation
+        AP_Int16 _t_drop_ms;        // Time drop in milliseconds
+        AP_Int16 _altitude_min;        // Minimum altitude above which Drop mode will initiate recovery - 0 to disable the check
+        AP_Int16 _altitude_max;        // Maximum altitude under which Drop mode will initiate recovery - 0 to disable the check
+        AP_Int8 _nextmode;        // Follow up mode after drop is successfully completed
     
         ThrowModeStage stage = Throw_Disarmed;
         ThrowModeStage prev_stage = Throw_Disarmed;

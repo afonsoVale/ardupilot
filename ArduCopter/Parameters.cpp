@@ -706,19 +706,6 @@ const AP_Param::Info Copter::var_info[] = {
     // @User: Advanced
     GSCALAR(throw_altitude_max, "THROW_ALT_MAX", 0),
 
-    // @Param: THROW_ALT_MIN
-    // @DisplayName: Throw mode minimum altitude
-    // @Description: Minimum altitude above which Throw mode will detect a throw or a drop - 0 to disable the check
-    // @Units: m
-    // @User: Advanced
-    GSCALAR(drop_altitude_min, "DROP_ALT_MIN", 0),
-
-    // @Param: THROW_ALT_MAX
-    // @DisplayName: Throw mode maximum altitude
-    // @Description: Maximum altitude under which Throw mode will detect a throw or a drop - 0 to disable the check
-    // @Units: m
-    // @User: Advanced
-    GSCALAR(drop_altitude_max, "DROP_ALT_MAX", 0),
 #endif
 
 #if OSD_ENABLED || OSD_PARAM_ENABLED
@@ -1246,6 +1233,12 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     // @User: Advanced
     AP_GROUPINFO("FS_EKF_FILT", 8, ParametersG2, fs_ekf_filt_hz, FS_EKF_FILT_DEFAULT),
 
+#if MODE_THROW_ENABLED
+    // @Group: DROP_
+    // @Path: mode_drop.cpp
+    AP_SUBGROUPPTR(mode_drop_ptr, "DROP_", 9, ParametersG2, ModeDrop),
+#endif
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND
@@ -1285,6 +1278,9 @@ ParametersG2::ParametersG2(void)
 #endif
 #if MODE_SYSTEMID_ENABLED
     ,mode_systemid_ptr(&copter.mode_systemid)
+#endif
+#if MODE_THROW_ENABLED
+    ,mode_drop_ptr(&copter.mode_drop)
 #endif
 #if MODE_AUTOROTATE_ENABLED
     ,arot()
