@@ -55,6 +55,13 @@ const AP_Param::GroupInfo ModeDrop::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("_NEXTMODE", 8, ModeDrop, _nextmode, 29),
 
+    // @Param: ANGLE
+    // @DisplayName: Tailsitter fixed wing transition angle
+    // @Description: This is the pitch angle at which tailsitter aircraft will change from VTOL control to fixed wing control.
+    // @Units: deg
+    // @Range: 1 16
+    AP_GROUPINFO("OVRD_CH", 9, ModeDrop, _override_channel, 10),
+
     AP_GROUPEND
 };
 
@@ -119,7 +126,7 @@ void ModeDrop::run()
         stage = Throw_Detecting;
 
     } else if (stage == Throw_Detecting && throw_detected()){
-        gcs().send_text(MAV_SEVERITY_INFO,"Drop detected - spooling motors");
+        gcs().send_text(MAV_SEVERITY_INFO,"Initiating recovery - spooling motors");
         copter.set_land_complete(false);
         stage = Throw_Wait_Throttle_Unlimited;
 
@@ -313,6 +320,15 @@ bool ModeDrop::throw_detected()
         return false;
     }
 
+    // Get position input from Scripting8 RC channel
+    int switchPWM = rc().channel((uint8_t) _override_channel-1)->get_radio_in();
+    // Check if switch is in the release position (above 0.5)
+    if (switchPWM > 1500) {
+        // Immediately trigger recovery
+        gcs().send_text(MAV_SEVERITY_NOTICE,"Drop recovery override activated");
+        return true;
+    }
+
     // Check the vertical acceleraton is greater than 0.25g
     bool free_falling = ahrs.get_accel_ef().z > _free_fall_accz * GRAVITY_MSS;
 
@@ -353,6 +369,7 @@ bool ModeDrop::throw_detected()
         free_fall_start_ms = AP_HAL::millis();
         free_fall_start_velz = inertial_nav.get_velocity_z_up_cms();
         free_fall_start_alt = altitude_above_home;
+        gcs().send_text(MAV_SEVERITY_INFO,"Drop detected");
     }
 
     // start motors and enter the control mode if we are in continuous freefall

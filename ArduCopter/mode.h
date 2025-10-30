@@ -1852,6 +1852,7 @@ class ModeDrop : public Mode {
         AP_Int16 _altitude_min;        // Minimum altitude above which Drop mode will initiate recovery - 0 to disable the check
         AP_Int16 _altitude_max;        // Maximum altitude under which Drop mode will initiate recovery - 0 to disable the check
         AP_Int8 _nextmode;        // Follow up mode after drop is successfully completed
+        AP_Int8 _override_channel;        // RC channel to use for override
     
         ThrowModeStage stage = Throw_Disarmed;
         ThrowModeStage prev_stage = Throw_Disarmed;
