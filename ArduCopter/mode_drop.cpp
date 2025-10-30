@@ -8,59 +8,58 @@ const AP_Param::GroupInfo ModeDrop::var_info[] = {
     // @DisplayName: Vertical acceleration threshold for freefall detection
     // @Description: The vertical acceleration threshold for freefall detection. If the vertical acceleration is greater than this threshold, the copter is considered to be in freefall.
     // @User: Standard
-    AP_GROUPINFO("_ACCZ", 1, ModeDrop, _free_fall_accz, 0.25f),
+    AP_GROUPINFO("_ACCZ", 0, ModeDrop, _free_fall_accz, 0.25f),
 
     // @Param: _VZ_FALL
     // @DisplayName: Vertical velocity threshold for freefall detection
     // @Description: The vertical velocity threshold for freefall detection. If the vertical velocity is below this threshold, the copter is considered to be in freefall.
     // @User: Standard
-    AP_GROUPINFO("_VZ_FALL", 2, ModeDrop, _free_fall_vz, 0.0f),
+    AP_GROUPINFO("_VZ_FALL", 1, ModeDrop, _free_fall_vz, 0.0f),
 
     // @Param: _ALT_DROP
     // @DisplayName: Minimum altitude dropped to trigger recovery
     // @Description: 
     // @User: Standard
-    AP_GROUPINFO("_ALT_DROP", 3, ModeDrop, _alt_drop, 0.0f),
+    AP_GROUPINFO("_ALT_DROP", 2, ModeDrop, _alt_drop, 0.0f),
 
     // @Param: _VZ_RECOVERY
     // @DisplayName: Vertical velocity threshold for recovery initiation
     // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
     // @User: Standard
-    AP_GROUPINFO("_VZ_RECOVERY", 4, ModeDrop, _vz_recovery, 0.0f),
+    AP_GROUPINFO("_VZ_RECOVERY", 3, ModeDrop, _vz_recovery, 0.0f),
 
     // @Param: _VZ_RECOVERY
     // @DisplayName: Vertical velocity threshold for recovery initiation
     // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
     // @User: Standard
-    AP_GROUPINFO("_TIME_DROP", 5, ModeDrop, _t_drop_ms, 0),
+    AP_GROUPINFO("_TIME_DROP", 4, ModeDrop, _t_drop_ms, 0),
 
     // @Param: _ALT_MIN
     // @DisplayName: Drop mode minimum recovery altitude
     // @Description: Minimum altitude above which Drop mode will initiate recovery - 0 to disable the check
     // @Units: m
     // @User: Advanced
-    AP_GROUPINFO("_ALT_MIN", 6, ModeDrop, _altitude_min, 0),
+    AP_GROUPINFO("_ALT_MIN", 5, ModeDrop, _altitude_min, 0),
 
     // @Param: _ALT_MAX
     // @DisplayName: Drop mode maximum recovery altitude
     // @Description: Maximum altitude under which Drop mode will initiate recovery - 0 to disable the check
     // @Units: m
     // @User: Advanced
-    AP_GROUPINFO("_ALT_MAX", 7, ModeDrop, _altitude_max, 0),
+    AP_GROUPINFO("_ALT_MAX", 6, ModeDrop, _altitude_max, 0),
 
     // @Param: _NEXTMODE
     // @DisplayName: Drop mode's follow up mode
     // @Description: Vehicle will switch to this mode after the drop is successfully completed.  Default is to stay in drop mode (29)
     // @Values: 3:Auto,4:Guided,5:LOITER,6:RTL,9:Land,17:Brake,29:Drop
     // @User: Standard
-    AP_GROUPINFO("_NEXTMODE", 8, ModeDrop, _nextmode, 29),
+    AP_GROUPINFO("_NEXTMODE", 7, ModeDrop, _nextmode, 29),
 
-    // @Param: ANGLE
-    // @DisplayName: Tailsitter fixed wing transition angle
-    // @Description: This is the pitch angle at which tailsitter aircraft will change from VTOL control to fixed wing control.
-    // @Units: deg
+    // @Param: _OVRD_CH
+    // @DisplayName: Recovery RC override channel
+    // @Description: RC channel to use for override of Drop mode recovery. Set to 0 to disable override functionality.
     // @Range: 1 16
-    AP_GROUPINFO("OVRD_CH", 9, ModeDrop, _override_channel, 10),
+    AP_GROUPINFO("OVRD_CH", 8, ModeDrop, _override_channel, 10),
 
     AP_GROUPEND
 };
@@ -321,14 +320,16 @@ bool ModeDrop::throw_detected()
     }
 
     // Get position input from Scripting8 RC channel
-    int switchPWM = rc().channel((uint8_t) _override_channel-1)->get_radio_in();
-    // Check if switch is in the release position (above 0.5)
-    if (switchPWM > 1500) {
-        // Immediately trigger recovery
-        gcs().send_text(MAV_SEVERITY_NOTICE,"Drop recovery override activated");
-        return true;
+    if (_override_channel.get() != 0 && _override_channel.get() <= 16) {
+        // Valid override channel configured
+        int switchPWM = rc().channel((uint8_t) _override_channel-1)->get_radio_in();
+        // Check if switch is in the release position (above 0.5)
+        if (switchPWM > 1500) {
+            // Immediately trigger recovery
+            gcs().send_text(MAV_SEVERITY_NOTICE,"Drop recovery override activated");
+            return true;
+        }
     }
-
     // Check the vertical acceleraton is greater than 0.25g
     bool free_falling = ahrs.get_accel_ef().z > _free_fall_accz * GRAVITY_MSS;
 

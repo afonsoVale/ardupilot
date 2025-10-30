@@ -1236,7 +1236,7 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
 #if MODE_THROW_ENABLED
     // @Group: DROP_
     // @Path: mode_drop.cpp
-    AP_SUBGROUPPTR(mode_drop_ptr, "DROP_", 9, ParametersG2, ModeDrop),
+    AP_SUBGROUPPTR(mode_drop_ptr, "DROP", 9, ParametersG2, ModeDrop),
 #endif
 
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
