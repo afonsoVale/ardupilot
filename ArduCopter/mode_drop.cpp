@@ -71,10 +71,17 @@ bool ModeDrop::init(bool ignore_checks)
     return false;
 #endif
 
+if (_vz_recovery < 0.0f && _alt_drop < 0.0f && _t_drop_ms < 0) {
+        // do not allow throw to start if no recovery criteria is set
+        return false;
+    }
+
     // do not enter the mode when already armed or when flying
     if (motors->armed()) {
         return false;
     }
+
+    free_fall_start_ms = 0;
 
     // init state
     stage = Throw_Disarmed;
@@ -108,11 +115,11 @@ void ModeDrop::run()
         stage = Throw_Disarmed;
 
     } else if (stage == Throw_Disarmed && motors->armed()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"waiting for throw");
+        gcs().send_text(MAV_SEVERITY_INFO,"Waiting for drop");
         stage = Throw_Detecting;
 
     } else if (stage == Throw_Detecting && throw_detected()){
-        gcs().send_text(MAV_SEVERITY_INFO,"throw detected - spooling motors");
+        gcs().send_text(MAV_SEVERITY_INFO,"Drop detected - spooling motors");
         copter.set_land_complete(false);
         stage = Throw_Wait_Throttle_Unlimited;
 
@@ -121,10 +128,10 @@ void ModeDrop::run()
 
     } else if (stage == Throw_Wait_Throttle_Unlimited &&
                motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED) {
-        gcs().send_text(MAV_SEVERITY_INFO,"throttle is unlimited - uprighting");
+        gcs().send_text(MAV_SEVERITY_INFO,"Throttle is unlimited - uprighting");
         stage = Throw_Uprighting;
     } else if (stage == Throw_Uprighting && throw_attitude_good()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"uprighted - controlling height");
+        gcs().send_text(MAV_SEVERITY_INFO,"Uprighted - controlling height");
         stage = Throw_HgtStabilise;
 
         // initialise the z controller
@@ -138,7 +145,7 @@ void ModeDrop::run()
         copter.set_auto_armed(true);
 
     } else if (stage == Throw_HgtStabilise && throw_height_good()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"height achieved - controlling position");
+        gcs().send_text(MAV_SEVERITY_INFO,"Height achieved - controlling position");
         stage = Throw_PosHold;
 
         // initialise position controller
@@ -306,15 +313,12 @@ bool ModeDrop::throw_detected()
         return false;
     }
 
-    // Check for high speed (>500 cm/s)
-    bool high_speed = inertial_nav.get_velocity_neu_cms().length_squared() > (THROW_HIGH_SPEED * THROW_HIGH_SPEED);
-
-    // check for upwards or downwards trajectory (airdrop) of 50cm/s
-    bool changing_height;
-    changing_height = inertial_nav.get_velocity_z_up_cms() < -THROW_VERTICAL_SPEED;
-
     // Check the vertical acceleraton is greater than 0.25g
-    bool free_falling = ahrs.get_accel_ef().z > -0.25 * GRAVITY_MSS;
+    bool free_falling = ahrs.get_accel_ef().z > _free_fall_accz * GRAVITY_MSS;
+
+    if (_free_fall_vz > 0.0f) {
+        free_falling = free_falling && (inertial_nav.get_velocity_z_up_cms() < -_free_fall_vz * 100.0f);
+    }
 
     // Check if the accel length is < 1.0g indicating that any throw action is complete and the copter has been released
     bool no_throw_action = copter.ins.get_accel().length() < 1.0f * GRAVITY_MSS;
@@ -328,24 +332,31 @@ bool ModeDrop::throw_detected()
         altitude_above_home = inertial_nav.get_position_z_up_cm() * 0.01f; // centimeters to meters
     }
 
+    // check for downward velocity greater than threshold
+    bool changing_height = (_vz_recovery > 0.0f) && (inertial_nav.get_velocity_z_up_cms() < -_vz_recovery * 100.0f);
+
+    // check for dropped altitude greater than threshold
+    bool dropped_altitude = (_alt_drop > 0.0f) && ((free_fall_start_alt - altitude_above_home) > _alt_drop);
+
+    // check for elapsed time greater than threshold
+    bool time_elapsed = (_t_drop_ms > 0) && ((AP_HAL::millis() - free_fall_start_ms) > (uint32_t)_t_drop_ms);
+
     // Check that the altitude is within user defined limits
     const bool height_within_params = (_altitude_min == 0 || altitude_above_home > _altitude_min) && (_altitude_max == 0 || (altitude_above_home < _altitude_max));
 
     // High velocity or free-fall combined with increasing height indicate a possible air-drop or throw release  
-    bool possible_throw_detected = (free_falling || high_speed) && changing_height && no_throw_action && height_within_params;
+    bool ready_for_recovery = (free_falling && no_throw_action && height_within_params) && (changing_height || dropped_altitude || time_elapsed);
 
 
-    // Record time and vertical velocity when we detect the possible throw
-    if (possible_throw_detected && ((AP_HAL::millis() - free_fall_start_ms) > 500)) {
+    // Record time and vertical velocity when we detect the possible drop
+    if (free_falling && free_fall_start_ms == 0) {
         free_fall_start_ms = AP_HAL::millis();
         free_fall_start_velz = inertial_nav.get_velocity_z_up_cms();
+        free_fall_start_alt = altitude_above_home;
     }
 
-    // Once a possible throw condition has been detected, we check for 2.5 m/s of downwards velocity change in less than 0.5 seconds to confirm
-    bool throw_condition_confirmed = ((AP_HAL::millis() - free_fall_start_ms < 500) && ((inertial_nav.get_velocity_z_up_cms() - free_fall_start_velz) < -250.0f));
-
     // start motors and enter the control mode if we are in continuous freefall
-    return throw_condition_confirmed;
+    return ready_for_recovery;
 }
 
 bool ModeDrop::throw_attitude_good() const

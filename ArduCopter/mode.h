@@ -1858,7 +1858,8 @@ class ModeDrop : public Mode {
         uint32_t last_log_ms;
         bool nextmode_attempted;
         uint32_t free_fall_start_ms;    // system time free fall was detected
-        float free_fall_start_velz;     // vertical velocity when free fall was detected
+        float free_fall_start_velz;      // vertical velocity when free fall was detected
+        float free_fall_start_alt;       // altitude when free fall was detected
     };
 
 #if MODE_TURTLE_ENABLED
