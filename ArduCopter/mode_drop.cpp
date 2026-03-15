@@ -304,8 +304,8 @@ void ModeDrop::run()
         prev_stage = stage;
         last_log_ms = now;
 
-        const float velocity = inertial_nav.get_velocity_neu_cms().length();
-        const float velocity_z = inertial_nav.get_velocity_z_up_cms();
+        const float velocity = inertial_nav.get_velocity_neu_cms().length() * 0.01f;
+        const float velocity_z = inertial_nav.get_velocity_z_up_cms() * 0.01f;
         const float accel = copter.ins.get_accel().length();
         const float ef_accel_z = ahrs.get_accel_ef().z;
         const bool throw_detect = (stage > Throw_Detecting) || throw_detected();
@@ -313,8 +313,8 @@ void ModeDrop::run()
         const bool height_ok = (stage > Throw_HgtStabilise) || throw_height_good();
         const bool pos_ok = (stage > Throw_PosHold) || throw_position_good();
 
-// @LoggerMessage: THRO
-// @Description: Throw Mode messages
+// @LoggerMessage: DROP
+// @Description: Drop Mode messages
 // @URL: https://ardupilot.org/copter/docs/throw-mode.html
 // @Field: TimeUS: Time since system startup
 // @Field: Stage: Current stage of the Throw Mode
@@ -328,7 +328,7 @@ void ModeDrop::run()
 // @Field: PosOk: True if the vehicle is within 50cm of the demanded horizontal position
 
         AP::logger().WriteStreaming(
-            "THRO",
+            "DROP",
             "TimeUS,Stage,Vel,VelZ,Acc,AccEfZ,Throw,AttOk,HgtOk,PosOk",
             "s-nnoo----",
             "F-0000----",
@@ -372,7 +372,7 @@ bool ModeDrop::throw_detected()
     const float altitude_above_home = drop_altitude_above_home_m(ahrs, inertial_nav);
 
     // Check the vertical acceleration is greater than the free fall threshold. Use the earth frame z acceleration which is less noisy than the body frame measurement for this check
-    bool free_falling = ahrs.get_accel_ef().z > - _free_fall_accz.get() * GRAVITY_MSS;
+    bool free_falling = ahrs.get_accel_ef().z > -(1.0f - _free_fall_accz.get()) * GRAVITY_MSS;
 
     if (_free_fall_vz > 0.0f) {
         free_falling = free_falling && (inertial_nav.get_velocity_z_up_cms() < -_free_fall_vz.get() * 100.0f);
@@ -390,14 +390,12 @@ bool ModeDrop::throw_detected()
         return false;
     }
 
-    // Check if the accel length is < 1.0g indicating that any throw action is complete and the copter has been released
-    const bool no_throw_action = ahrs.get_accel_ef().length() < (GRAVITY_MSS * 1.0f);
+    // Check if the accel length is < 1.2g indicating that any throw action is complete and the copter has been released
+    const bool no_throw_action = ahrs.get_accel_ef().length() < (GRAVITY_MSS * 1.2f);
 
     const bool changing_height =
         (_vz_recovery > 0.0f) && (inertial_nav.get_velocity_z_up_cms() < -_vz_recovery * 100.0f);
-    gcs().send_text(MAV_SEVERITY_INFO, "Drop alt: %.2f m", (double)free_fall_start_alt);
-    gcs().send_text(MAV_SEVERITY_INFO, "throw_detected: alt=%.2f m, vel_z=%.2f m/s, free_falling=%d, no_throw_action=%d, changing_height=%d",
-                    (double)altitude_above_home, (double)inertial_nav.get_velocity_z_up_cms(), free_falling, no_throw_action, changing_height);
+
     const bool dropped_altitude =
         (_alt_drop > 0.0f) && ((free_fall_start_alt - altitude_above_home) > _alt_drop);
 
