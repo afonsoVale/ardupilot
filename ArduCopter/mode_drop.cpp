@@ -6,60 +6,69 @@ const AP_Param::GroupInfo ModeDrop::var_info[] = {
 
     // @Param: _ACCZ
     // @DisplayName: Vertical acceleration threshold for freefall detection
-    // @Description: The vertical acceleration threshold for freefall detection. If the vertical acceleration is greater than this threshold, the copter is considered to be in freefall.
+    // @Description: The vertical acceleration threshold for freefall detection. If the vertical acceleration is greater than this threshold, the copter is considered to be in freefall. Expressed in g.
     // @User: Standard
-    AP_GROUPINFO("_ACCZ", 0, ModeDrop, _free_fall_accz, 0.25f),
+    AP_GROUPINFO("_ACCZ", 0, ModeDrop, _free_fall_accz, 0.8f),
 
     // @Param: _VZ_FALL
-    // @DisplayName: Vertical velocity threshold for freefall detection
-    // @Description: The vertical velocity threshold for freefall detection. If the vertical velocity is below this threshold, the copter is considered to be in freefall.
+    // @DisplayName: Vertical velocity threshold for initial drop detection
+    // @Description: Downward velocity threshold (m/s) used to latch the start of the drop. Set to 0 to use a small default threshold.
     // @User: Standard
     AP_GROUPINFO("_VZ_FALL", 1, ModeDrop, _free_fall_vz, 0.0f),
 
     // @Param: _ALT_DROP
     // @DisplayName: Minimum altitude dropped to trigger recovery
-    // @Description: 
+    // @Description: Recovery can start when the vehicle has dropped at least this amount (m) from the release point.
     // @User: Standard
-    AP_GROUPINFO("_ALT_DROP", 2, ModeDrop, _alt_drop, 0.0f),
+    AP_GROUPINFO("_ALT_DROP", 2, ModeDrop, _alt_drop, 0.5f),
 
     // @Param: _VZ_RECOVERY
     // @DisplayName: Vertical velocity threshold for recovery initiation
     // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
     // @User: Standard
-    AP_GROUPINFO("_VZ_RECOVERY", 3, ModeDrop, _vz_recovery, 0.0f),
+    AP_GROUPINFO("_VZ_RECOVERY", 3, ModeDrop, _vz_recovery, 1.0f),
 
-    // @Param: _VZ_RECOVERY
-    // @DisplayName: Vertical velocity threshold for recovery initiation
-    // @Description: The vertical velocity threshold for recovery initiation. If the vertical velocity is below this threshold, the copter will initiate recovery.
+    // @Param: _TIME_DROP
+    // @DisplayName: Time threshold for recovery initiation
+    // @Description: Recovery can start this many milliseconds after drop detection.
+    // @Units: ms
     // @User: Standard
-    AP_GROUPINFO("_TIME_DROP", 4, ModeDrop, _t_drop_ms, 0),
+    AP_GROUPINFO("_TIME_DROP", 4, ModeDrop, _t_drop_ms, 300),
 
     // @Param: _ALT_MIN
     // @DisplayName: Drop mode minimum recovery altitude
-    // @Description: Minimum altitude above which Drop mode will initiate recovery - 0 to disable the check
+    // @Description: Minimum altitude above which Drop mode will initiate recovery. Set to 0 to disable.
     // @Units: m
     // @User: Advanced
     AP_GROUPINFO("_ALT_MIN", 5, ModeDrop, _altitude_min, 0),
 
     // @Param: _ALT_MAX
     // @DisplayName: Drop mode maximum recovery altitude
-    // @Description: Maximum altitude under which Drop mode will initiate recovery - 0 to disable the check
+    // @Description: Maximum altitude under which Drop mode will initiate recovery. Set to 0 to disable.
     // @Units: m
     // @User: Advanced
     AP_GROUPINFO("_ALT_MAX", 6, ModeDrop, _altitude_max, 0),
 
     // @Param: _NEXTMODE
     // @DisplayName: Drop mode's follow up mode
-    // @Description: Vehicle will switch to this mode after the drop is successfully completed.  Default is to stay in drop mode (29)
-    // @Values: 3:Auto,4:Guided,5:LOITER,6:RTL,9:Land,17:Brake,29:Drop
+    // @Description: Vehicle will switch to this mode after the drop is successfully completed.
+    // @Values: 3:Auto,4:Guided,5:Loiter,6:RTL,9:Land,17:Brake,29:Drop
     // @User: Standard
     AP_GROUPINFO("_NEXTMODE", 7, ModeDrop, _nextmode, 29),
 
     // @Param: _OVRD_CH
     // @DisplayName: Recovery RC override channel
-    // @Description: RC channel to use for override of Drop mode recovery. Set to 0 to disable override functionality.
+    // @Description: RC channel to use for override of Drop mode recovery. Set to 0 to disable.
     // @Range: 1 16
-    AP_GROUPINFO("OVRD_CH", 8, ModeDrop, _override_channel, 10),
+    // @User: Standard
+    AP_GROUPINFO("_OVRD_CH", 8, ModeDrop, _override_channel, 10),
+
+    // @Param: _RCV_THR
+    // @DisplayName: Throttle output during initial recovery stage
+    // @Description: Throttle output during initial recovery stage.
+    // @Range: 0.0 1.0
+    // @User: Standard
+    AP_GROUPINFO("_RCV_THR", 9, ModeDrop, _recovery_throttle, 0.5f),
 
     AP_GROUPEND
 };
@@ -69,7 +78,20 @@ ModeDrop::ModeDrop(void) : Mode()
     AP_Param::setup_object_defaults(this, var_info);
 }
 
-// throw_init - initialise throw controller
+// helper: altitude above home in meters
+static float drop_altitude_above_home_m(const AP_AHRS &ahrs, const AP_InertialNav &inertial_nav)
+{
+    float altitude_above_home;
+    if (ahrs.home_is_set()) {
+        ahrs.get_relative_position_D_home(altitude_above_home);
+        altitude_above_home = -altitude_above_home;   // returned as negative down
+    } else {
+        altitude_above_home = inertial_nav.get_position_z_up_cm() * 0.01f;
+    }
+    return altitude_above_home;
+}
+
+// initialise drop controller
 bool ModeDrop::init(bool ignore_checks)
 {
 #if FRAME_CONFIG == HELI_FRAME
@@ -77,17 +99,21 @@ bool ModeDrop::init(bool ignore_checks)
     return false;
 #endif
 
-if (_vz_recovery < 0.0f && _alt_drop < 0.0f && _t_drop_ms < 0) {
-        // do not allow throw to start if no recovery criteria is set
+    // require at least one recovery trigger
+    if (_vz_recovery <= 0.0f && _alt_drop <= 0.0f && _t_drop_ms <= 0) {
+        gcs().send_text(MAV_SEVERITY_ERROR, "DROP init failed: no recovery trigger");
         return false;
     }
 
-    // do not enter the mode when already armed or when flying
+    // must enter while disarmed
     if (motors->armed()) {
+        gcs().send_text(MAV_SEVERITY_ERROR, "DROP init failed: arm after mode select");
         return false;
     }
 
     free_fall_start_ms = 0;
+    free_fall_start_velz = 0.0f;
+    free_fall_start_alt = 0.0f;
 
     // init state
     stage = Throw_Disarmed;
@@ -104,7 +130,7 @@ if (_vz_recovery < 0.0f && _alt_drop < 0.0f && _t_drop_ms < 0) {
     return true;
 }
 
-// runs the throw to start controller
+// runs the drop controller
 // should be called at 100hz or more
 void ModeDrop::run()
 {
@@ -119,14 +145,22 @@ void ModeDrop::run()
     if (!motors->armed()) {
         // state machine entry is always from a disarmed state
         stage = Throw_Disarmed;
+        free_fall_start_ms = 0;
+        nextmode_attempted = false;
 
     } else if (stage == Throw_Disarmed && motors->armed()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"Waiting for drop");
+
+        // prevent disarm while suspended and waiting
+        copter.set_auto_armed(true);
+        copter.set_land_complete(false);
+
+        gcs().send_text(MAV_SEVERITY_INFO, "Waiting for drop");
         stage = Throw_Detecting;
 
-    } else if (stage == Throw_Detecting && throw_detected()){
-        gcs().send_text(MAV_SEVERITY_INFO,"Initiating recovery - spooling motors");
+    } else if (stage == Throw_Detecting && throw_detected()) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Initiating recovery - spooling motors");
         copter.set_land_complete(false);
+        copter.set_auto_armed(true);
         stage = Throw_Wait_Throttle_Unlimited;
 
         // Cancel the waiting for throw tone sequence
@@ -134,24 +168,25 @@ void ModeDrop::run()
 
     } else if (stage == Throw_Wait_Throttle_Unlimited &&
                motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED) {
-        gcs().send_text(MAV_SEVERITY_INFO,"Throttle is unlimited - uprighting");
+        gcs().send_text(MAV_SEVERITY_INFO, "Throttle is unlimited - uprighting");
         stage = Throw_Uprighting;
+
     } else if (stage == Throw_Uprighting && throw_attitude_good()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"Uprighted - controlling height");
+        gcs().send_text(MAV_SEVERITY_INFO, "Uprighted - controlling height");
         stage = Throw_HgtStabilise;
 
         // initialise the z controller
         pos_control->init_z_controller_no_descent();
 
-        // initialise the demanded height to 3m above the throw height
+        // initialise the demanded height to 3m above the current height
         // we want to rapidly clear surrounding obstacles
-        pos_control->set_pos_desired_z_cm(inertial_nav.get_position_z_up_cm() - 100);
+        pos_control->set_pos_desired_z_cm(inertial_nav.get_position_z_up_cm() + 300.0f);
 
         // Set the auto_arm status to true to avoid a possible automatic disarm caused by selection of an auto mode with throttle at minimum
         copter.set_auto_armed(true);
 
     } else if (stage == Throw_HgtStabilise && throw_height_good()) {
-        gcs().send_text(MAV_SEVERITY_INFO,"Height achieved - controlling position");
+        gcs().send_text(MAV_SEVERITY_INFO, "Height achieved - controlling position");
         stage = Throw_PosHold;
 
         // initialise position controller
@@ -159,6 +194,7 @@ void ModeDrop::run()
 
         // Set the auto_arm status to true to avoid a possible automatic disarm caused by selection of an auto mode with throttle at minimum
         copter.set_auto_armed(true);
+
     } else if (stage == Throw_PosHold && throw_position_good()) {
         if (!nextmode_attempted) {
             switch ((Mode::Number)_nextmode.get()) {
@@ -189,7 +225,7 @@ void ModeDrop::run()
         // demand zero throttle (motors will be stopped anyway) and continually reset the attitude controller
         attitude_control->reset_yaw_target_and_rate();
         attitude_control->reset_rate_controller_I_terms();
-        attitude_control->set_throttle_out(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(0.0f, true, g.throttle_filt);
         break;
 
     case Throw_Detecting:
@@ -200,18 +236,17 @@ void ModeDrop::run()
         // Hold throttle at zero during the throw and continually reset the attitude controller
         attitude_control->reset_yaw_target_and_rate();
         attitude_control->reset_rate_controller_I_terms();
-        attitude_control->set_throttle_out(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(0.0f, true, g.throttle_filt);
 
         // Play the waiting for throw tone sequence to alert the user
         AP_Notify::flags.waiting_for_throw = true;
-
+        copter.set_auto_armed(true);
         break;
 
     case Throw_Wait_Throttle_Unlimited:
 
         // set motors to full range
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
-
         break;
 
     case Throw_Uprighting:
@@ -223,7 +258,7 @@ void ModeDrop::run()
         attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(0.0f, 0.0f, 0.0f);
 
         // output 50% throttle and turn off angle boost to maximise righting moment
-        attitude_control->set_throttle_out(0.5f, false, g.throttle_filt);
+        attitude_control->set_throttle_out(_recovery_throttle.get(), false, g.throttle_filt);
 
         break;
 
@@ -268,6 +303,7 @@ void ModeDrop::run()
     if ((stage != prev_stage) || (now - last_log_ms) > 100) {
         prev_stage = stage;
         last_log_ms = now;
+
         const float velocity = inertial_nav.get_velocity_neu_cms().length();
         const float velocity_z = inertial_nav.get_velocity_z_up_cms();
         const float accel = copter.ins.get_accel().length();
@@ -315,66 +351,65 @@ bool ModeDrop::throw_detected()
 {
     // Check that we have a valid navigation solution
     nav_filter_status filt_status = inertial_nav.get_filter_status();
-    if (!filt_status.flags.attitude || !filt_status.flags.horiz_pos_abs || !filt_status.flags.vert_pos) {
+    if (!filt_status.flags.attitude || !filt_status.flags.vert_pos) {
         return false;
     }
 
-    // Get position input from Scripting8 RC channel
+    // RC override
     if (_override_channel.get() != 0 && _override_channel.get() <= 16) {
         // Valid override channel configured
-        int switchPWM = rc().channel((uint8_t) _override_channel-1)->get_radio_in();
-        // Check if switch is in the release position (above 0.5)
-        if (switchPWM > 1500) {
-            // Immediately trigger recovery
-            gcs().send_text(MAV_SEVERITY_NOTICE,"Drop recovery override activated");
-            return true;
+        RC_Channel *ch = rc().channel((uint8_t)_override_channel.get() - 1);
+        if (ch != nullptr) {
+            const int switch_pwm = ch->get_radio_in();
+            if (switch_pwm > 1500) {
+                // Immediately trigger recovery
+                gcs().send_text(MAV_SEVERITY_NOTICE, "Drop recovery override activated");
+                return true;
+            }
         }
     }
-    // Check the vertical acceleraton is greater than 0.25g
-    bool free_falling = ahrs.get_accel_ef().z > _free_fall_accz * GRAVITY_MSS;
+
+    const float altitude_above_home = drop_altitude_above_home_m(ahrs, inertial_nav);
+
+    // Check the vertical acceleration is greater than the free fall threshold. Use the earth frame z acceleration which is less noisy than the body frame measurement for this check
+    bool free_falling = ahrs.get_accel_ef().z > - _free_fall_accz.get() * GRAVITY_MSS;
 
     if (_free_fall_vz > 0.0f) {
-        free_falling = free_falling && (inertial_nav.get_velocity_z_up_cms() < -_free_fall_vz * 100.0f);
+        free_falling = free_falling && (inertial_nav.get_velocity_z_up_cms() < -_free_fall_vz.get() * 100.0f);
     }
 
-    // Check if the accel length is < 1.0g indicating that any throw action is complete and the copter has been released
-    bool no_throw_action = copter.ins.get_accel().length() < 1.0f * GRAVITY_MSS;
-
-    // fetch the altitude above home
-    float altitude_above_home;  // Use altitude above home if it is set, otherwise relative to EKF origin
-    if (ahrs.home_is_set()) {
-        ahrs.get_relative_position_D_home(altitude_above_home);
-        altitude_above_home = -altitude_above_home; // altitude above home is returned as negative
-    } else {
-        altitude_above_home = inertial_nav.get_position_z_up_cm() * 0.01f; // centimeters to meters
-    }
-
-    // check for downward velocity greater than threshold
-    bool changing_height = (_vz_recovery > 0.0f) && (inertial_nav.get_velocity_z_up_cms() < -_vz_recovery * 100.0f);
-
-    // check for dropped altitude greater than threshold
-    bool dropped_altitude = (_alt_drop > 0.0f) && ((free_fall_start_alt - altitude_above_home) > _alt_drop);
-
-    // check for elapsed time greater than threshold
-    bool time_elapsed = (_t_drop_ms > 0) && ((AP_HAL::millis() - free_fall_start_ms) > (uint32_t)_t_drop_ms);
-
-    // Check that the altitude is within user defined limits
-    const bool height_within_params = (_altitude_min == 0 || altitude_above_home > _altitude_min) && (_altitude_max == 0 || (altitude_above_home < _altitude_max));
-
-    // High velocity or free-fall combined with increasing height indicate a possible air-drop or throw release  
-    bool ready_for_recovery = (free_falling && no_throw_action && height_within_params) && (changing_height || dropped_altitude || time_elapsed);
-
-
-    // Record time and vertical velocity when we detect the possible drop
     if (free_falling && free_fall_start_ms == 0) {
         free_fall_start_ms = AP_HAL::millis();
         free_fall_start_velz = inertial_nav.get_velocity_z_up_cms();
         free_fall_start_alt = altitude_above_home;
-        gcs().send_text(MAV_SEVERITY_INFO,"Drop detected");
+        gcs().send_text(MAV_SEVERITY_INFO, "Drop detected");
     }
 
-    // start motors and enter the control mode if we are in continuous freefall
-    return ready_for_recovery;
+    // if drop was not latched yet, do not recover yet
+    if (free_fall_start_ms == 0) {
+        return false;
+    }
+
+    // Check if the accel length is < 1.0g indicating that any throw action is complete and the copter has been released
+    const bool no_throw_action = ahrs.get_accel_ef().length() < (GRAVITY_MSS * 1.0f);
+
+    const bool changing_height =
+        (_vz_recovery > 0.0f) && (inertial_nav.get_velocity_z_up_cms() < -_vz_recovery * 100.0f);
+    gcs().send_text(MAV_SEVERITY_INFO, "Drop alt: %.2f m", (double)free_fall_start_alt);
+    gcs().send_text(MAV_SEVERITY_INFO, "throw_detected: alt=%.2f m, vel_z=%.2f m/s, free_falling=%d, no_throw_action=%d, changing_height=%d",
+                    (double)altitude_above_home, (double)inertial_nav.get_velocity_z_up_cms(), free_falling, no_throw_action, changing_height);
+    const bool dropped_altitude =
+        (_alt_drop > 0.0f) && ((free_fall_start_alt - altitude_above_home) > _alt_drop);
+
+    const bool time_elapsed =
+        (_t_drop_ms > 0) &&
+        ((AP_HAL::millis() - free_fall_start_ms) > (uint32_t)_t_drop_ms);
+
+    const bool height_within_params =
+        (_altitude_min == 0 || altitude_above_home > _altitude_min) &&
+        (_altitude_max == 0 || altitude_above_home < _altitude_max);
+
+    return free_falling && no_throw_action  && height_within_params && (changing_height || dropped_altitude || time_elapsed);
 }
 
 bool ModeDrop::throw_attitude_good() const
@@ -386,14 +421,20 @@ bool ModeDrop::throw_attitude_good() const
 
 bool ModeDrop::throw_height_good() const
 {
-    // Check that we are within 0.5m of the demanded height
-    return (pos_control->get_pos_error_z_cm() < 50.0f);
+    const float pos_err_z_cm = pos_control->get_pos_error_z_cm();
+    const float vel_z_up_cms = inertial_nav.get_velocity_z_up_cms();
+
+    // Only declare height recovered if we are close to target
+    // and no longer descending significantly
+    return (pos_err_z_cm < 50.0f) && (vel_z_up_cms > -50.0f);
 }
 
 bool ModeDrop::throw_position_good() const
 {
-    // check that our horizontal position error is within 50cm
-    return (pos_control->get_pos_error_xy_cm() < 50.0f);
+    const float pos_err_xy_cm = pos_control->get_pos_error_xy_cm();
+    const Vector3f vel_neu_cms = inertial_nav.get_velocity_neu_cms();
+    const float horiz_speed_cms = sqrtf(vel_neu_cms.x * vel_neu_cms.x + vel_neu_cms.y * vel_neu_cms.y);
+    return (pos_err_xy_cm < 50.0f) && (horiz_speed_cms < 100.0f);
 }
 
 #endif
